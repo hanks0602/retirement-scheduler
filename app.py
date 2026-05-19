@@ -78,199 +78,237 @@ def load_baseline_data(filepath):
     return df
 
 # ==========================================
-# STREAMLIT UI LAYOUT
+# STREAMLIT UI MULTIPAGE SETUP
 # ==========================================
 st.set_page_config(page_title="Retirement Simulator", layout="wide")
-st.title("Financial Planning & Retirement Simulator")
 
-# --- SIDEBAR CONTROLS ---
-st.sidebar.header("Configuration")
-data_mode = st.sidebar.radio("Data Source Toggle", options=["Use CSV Baseline Data", "Custom Manual Simulation"])
+def page_settings():
+    st.title("⚙️ 財務參數設定中心")
+    st.markdown("請設定您的財務參數。調整滑桿時**不會即時重新計算**，確認無誤後請點擊最下方的按鈕執行模擬。")
+    
+    data_mode = st.radio("資料來源", options=["使用 CSV 基準資料", "自訂手動模擬"])
+    
+    if data_mode == "使用 CSV 基準資料":
+        st.info("已載入 personal_data.csv 基準設定")
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("收入設定")
+            start_salary = st.number_input("初始稅前年薪 (元)", value=1000000, step=50000)
+            salary_growth = st.slider("預估年薪成長率 (%)", min_value=0.0, max_value=10.0, value=3.0, step=0.5)
+            
+            st.subheader("支出與通膨設定")
+            expense_tier = st.selectbox("日常支出級距", options=["低", "中", "高"], index=1)
+            
+            tier_mapping = {"低": 400000, "中": 600000, "高": 800000}
+            base_expense = tier_mapping[expense_tier]
+            
+            inflation = st.slider("預估通膨率 (%)", min_value=0.0, max_value=10.0, value=2.5, step=0.1)
+            
+        with col2:
+            st.subheader("投資設定")
+            start_assets = st.number_input("初始投資資產 (元)", value=1000000, step=100000)
+            roi = st.slider("預期投資報酬率 (%)", min_value=0.0, max_value=20.0, value=6.0, step=0.5)
+            
+            st.subheader("重大人生里程碑")
+            retirement_year = st.number_input("預定退休年份 (薪資歸零)", value=2041, step=1)
+            house_year = st.number_input("預定買房年份", value=2030, step=1)
+            house_cost = st.number_input("買房頭期款/總花費 (元)", value=5000000, step=100000)
+            
+            car_year_1 = st.number_input("第一次買車年份", value=2030, step=1)
+            car_year_2 = st.number_input("第二次買車年份", value=2040, step=1)
+            car_cost = st.number_input("購車預算 (元)", value=750000, step=50000)
+            
+            years_to_simulate = st.slider("模擬年數", min_value=10, max_value=60, value=54, step=1)
+    
+    st.markdown("---")
+    if st.button("📊 儲存配置並執行模擬", type="primary", use_container_width=True):
+        if data_mode == "使用 CSV 基準資料":
+            df = load_baseline_data("personal_data.csv")
+            ret_year = 2041
+        else:
+            df = run_simulation(
+                start_year=2027,
+                years_to_simulate=years_to_simulate,
+                start_assets=start_assets,
+                start_salary=start_salary,
+                salary_growth=salary_growth,
+                base_expense=base_expense,
+                inflation=inflation,
+                roi=roi,
+                house_year=house_year,
+                house_cost=house_cost,
+                retirement_year=retirement_year,
+                car_year_1=car_year_1,
+                car_year_2=car_year_2,
+                car_cost=car_cost
+            )
+            ret_year = retirement_year
+        
+        st.session_state.sim_data = df
+        st.session_state.data_mode = data_mode
+        st.session_state.ret_year = ret_year
+        st.switch_page(page_dashboard_obj)
 
-df = pd.DataFrame()
+def page_dashboard():
+    st.title("📊 退休資產模擬看板")
+    
+    if "sim_data" not in st.session_state or st.session_state.sim_data.empty:
+        st.warning("⚠️ 請先至左側「⚙️ 財務參數設定中心」設定參數並點擊執行模擬。")
+        if st.button("前往設定", type="primary"):
+            st.switch_page(page_settings_obj)
+        st.stop()
+        
+    df = st.session_state.sim_data
+    data_mode = st.session_state.data_mode
+    ret_year = st.session_state.ret_year
 
-if data_mode == "Use CSV Baseline Data":
-    st.sidebar.info("Loading baseline configuration from personal_data.csv")
-    df = load_baseline_data("personal_data.csv")
+    # --- KPI Calculations ---
+    df['Passive Income Exceeds Expenses'] = df['Investment Return'] > df['Total Expenses']
+    crossover_years = df[df['Passive Income Exceeds Expenses']]['Year']
+
+    retirement_age_text = "未能達成"
+    if not crossover_years.empty:
+        crossover_yr = crossover_years.iloc[0]
+        retirement_age_text = str(crossover_yr)
+
+    # 1. 2040 Baseline Asset Check
+    assets_2040 = 0
+    if 2040 in df['Year'].values:
+        assets_2040 = df.loc[df['Year'] == 2040, 'Ending Investment Assets'].values[0]
+
+    # 2. First Year of Retirement Total Expenses
+    ret_expenses = 0
+    if ret_year in df['Year'].values:
+        ret_expenses = df.loc[df['Year'] == ret_year, 'Total Expenses'].values[0]
+
+    # 3. 4% Safe Withdrawal Rate Amount (Based on year prior to retirement)
+    safe_withdrawal = 0
+    if (ret_year - 1) in df['Year'].values:
+        assets_at_ret = df.loc[df['Year'] == (ret_year - 1), 'Ending Investment Assets'].values[0]
+        safe_withdrawal = assets_at_ret * 0.04
+
+    # Sustainability Score
+    final_assets = df.iloc[-1]['Ending Investment Assets']
+    if final_assets < 0:
+        sustainability = "危險 (資產耗盡)"
+        sustainability_color = "red"
+    elif final_assets < df.iloc[0]['Ending Investment Assets']:
+        sustainability = "警告 (資產衰退)"
+        sustainability_color = "orange"
+    else:
+        sustainability = "安全 (資產成長)"
+        sustainability_color = "green"
+
+    # Render KPIs
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(label="預估達成財務自由年份", value=retirement_age_text)
+    with col2:
+        st.metric(label="2040 年底期末資產 (元)", value=f"{assets_2040:,.0f}")
+    with col3:
+        st.markdown(f"**長期財務永續性評估**")
+        st.markdown(f"<h3 style='color: {sustainability_color}; margin-top: -10px;'>{sustainability}</h3>", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        st.metric(label=f"4% 安全提領金 (元)", value=f"{safe_withdrawal:,.0f}")
+    with col5:
+        st.metric(label=f"退休首年 ({ret_year}) 總支出 (元)", value=f"{ret_expenses:,.0f}")
+    with col6:
+        rule_status = "安全 ✅" if safe_withdrawal >= ret_expenses else "危險 ⚠️"
+        rule_color = "green" if safe_withdrawal >= ret_expenses else "red"
+        st.markdown(f"**4% 法則健康檢查**")
+        st.markdown(f"<h3 style='color: {rule_color}; margin-top: -10px;'>{rule_status}</h3>", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # --- CHARTS ---
+    col_chart1, col_chart2 = st.columns(2)
+
+    with col_chart1:
+        st.subheader("資產累積曲線")
+        fig1 = px.line(
+            df, 
+            x="Year", 
+            y="Ending Investment Assets", 
+            title="歷年期末投資資產走勢",
+            markers=True,
+            labels={"Year": "年份", "Ending Investment Assets": "期末投資資產"}
+        )
+        fig1.update_yaxes(tickformat=",.0f")
+        st.plotly_chart(fig1, width='stretch')
+
+    with col_chart2:
+        st.subheader("收入與報酬 vs. 總支出")
+        fig2 = go.Figure()
+        
+        # Net Salary
+        fig2.add_trace(go.Bar(
+            x=df['Year'], 
+            y=df['Net Salary'], 
+            name='稅後淨薪資', 
+            marker_color='blue'
+        ))
+        
+        # Investment Return (Passive Income)
+        fig2.add_trace(go.Bar(
+            x=df['Year'], 
+            y=df['Investment Return'], 
+            name='投資報酬 (被動收入)', 
+            marker_color='green'
+        ))
+        
+        # Total Expenses (Negative for comparison or line overlay)
+        fig2.add_trace(go.Scatter(
+            x=df['Year'], 
+            y=df['Total Expenses'], 
+            name='總支出', 
+            mode='lines+markers',
+            line=dict(color='red', width=3)
+        ))
+        
+        fig2.update_layout(
+            barmode='stack',
+            title="資金來源 vs. 總支出對比",
+            yaxis=dict(tickformat=",.0f")
+        )
+        st.plotly_chart(fig2, width='stretch')
+
+    # --- DATA TABLE ---
+    st.subheader("歷年詳細模擬數據")
     
-else:
-    st.sidebar.subheader("Income Controls")
-    start_salary = st.sidebar.number_input("Starting Gross Salary (TWD)", value=1000000, step=50000)
-    salary_growth = st.sidebar.slider("Annual Salary Growth Rate (%)", min_value=0.0, max_value=10.0, value=3.0, step=0.5)
-    
-    st.sidebar.subheader("Expense & Inflation Controls")
-    expense_tier = st.sidebar.selectbox("Expense Tier", options=["Low", "Medium", "High"], index=1)
-    
-    tier_mapping = {"Low": 400000, "Medium": 600000, "High": 800000}
-    base_expense = tier_mapping[expense_tier]
-    
-    inflation = st.sidebar.slider("Inflation Rate (%)", min_value=0.0, max_value=10.0, value=2.5, step=0.1)
-    
-    st.sidebar.subheader("Investment Controls")
-    start_assets = st.sidebar.number_input("Starting Investment Assets (TWD)", value=1000000, step=100000)
-    roi = st.sidebar.slider("Expected ROI (%)", min_value=0.0, max_value=20.0, value=6.0, step=0.5)
-    
-    st.sidebar.subheader("Key Milestones (Overrides)")
-    retirement_year = st.sidebar.number_input("Retirement Year (Salary becomes 0)", value=2041, step=1)
-    house_year = st.sidebar.number_input("House Purchase Year", value=2030, step=1)
-    house_cost = st.sidebar.number_input("House Downpayment/Total Cost (TWD)", value=5000000, step=100000)
-    
-    car_year_1 = st.sidebar.number_input("First Car Purchase Year", value=2030, step=1)
-    car_year_2 = st.sidebar.number_input("Second Car Purchase Year", value=2040, step=1)
-    car_cost = st.sidebar.number_input("Car Budget (TWD)", value=750000, step=50000)
-    
-    years_to_simulate = st.sidebar.slider("Simulation Years", min_value=10, max_value=60, value=54, step=1)
-    
-    # Run dynamic simulation
-    df = run_simulation(
-        start_year=2027,
-        years_to_simulate=years_to_simulate,
-        start_assets=start_assets,
-        start_salary=start_salary,
-        salary_growth=salary_growth,
-        base_expense=base_expense,
-        inflation=inflation,
-        roi=roi,
-        house_year=house_year,
-        house_cost=house_cost,
-        retirement_year=retirement_year,
-        car_year_1=car_year_1,
-        car_year_2=car_year_2,
-        car_cost=car_cost
+    column_mapping = {
+        "Year": "年份",
+        "Gross Salary": "稅前年薪",
+        "Income Tax": "所得稅",
+        "Net Salary": "稅後淨薪資",
+        "Total Expenses": "總支出",
+        "Beginning Investment Assets": "期初投資資產",
+        "Investment Return": "投資報酬",
+        "Annual Net Savings": "年度淨結餘",
+        "Ending Investment Assets": "期末投資資產",
+        "Passive Income Exceeds Expenses": "財務自由達標"
+    }
+    display_df = df.rename(columns=column_mapping)
+
+    # Format dataframe for display
+    format_dict = {col: '{:,.0f}' for col in display_df.columns if display_df[col].dtype in ['float64', 'int64'] and col != '年份'}
+    if '年份' in display_df.columns:
+        format_dict['年份'] = '{:.0f}'
+
+    styled_df = display_df.style.format(format_dict).map(
+        lambda x: 'color: red' if isinstance(x, (int, float)) and x < 0 else '', 
+        subset=['年度淨結餘', '期末投資資產']
     )
 
-# --- MAIN DASHBOARD ---
-if df.empty:
-    st.warning("No data available to display.")
-    st.stop()
+    st.dataframe(styled_df, width='stretch', height=400)
 
-# --- KPI Calculations ---
-df['Passive Income Exceeds Expenses'] = df['Investment Return'] > df['Total Expenses']
-crossover_years = df[df['Passive Income Exceeds Expenses']]['Year']
+# --- PAGE REGISTRATION & NAVIGATION ---
+page_settings_obj = st.Page(page_settings, title="財務參數設定中心", icon="⚙️", default=True)
+page_dashboard_obj = st.Page(page_dashboard, title="退休資產模擬看板", icon="📊")
 
-retirement_age_text = "Not Achieved"
-if not crossover_years.empty:
-    crossover_yr = crossover_years.iloc[0]
-    retirement_age_text = str(crossover_yr)
-
-# Task 5 Calculations
-# Fallback to 2041 if in CSV mode where the slider isn't defined
-ret_year = retirement_year if data_mode != "Use CSV Baseline Data" else 2041
-
-# 1. 2040 Baseline Asset Check
-assets_2040 = 0
-if 2040 in df['Year'].values:
-    assets_2040 = df.loc[df['Year'] == 2040, 'Ending Investment Assets'].values[0]
-
-# 2. First Year of Retirement Total Expenses
-ret_expenses = 0
-if ret_year in df['Year'].values:
-    ret_expenses = df.loc[df['Year'] == ret_year, 'Total Expenses'].values[0]
-
-# 3. 4% Safe Withdrawal Rate Amount (Based on year prior to retirement)
-safe_withdrawal = 0
-if (ret_year - 1) in df['Year'].values:
-    assets_at_ret = df.loc[df['Year'] == (ret_year - 1), 'Ending Investment Assets'].values[0]
-    safe_withdrawal = assets_at_ret * 0.04
-
-# Sustainability Score
-final_assets = df.iloc[-1]['Ending Investment Assets']
-if final_assets < 0:
-    sustainability = "Critical (Depleted)"
-    sustainability_color = "red"
-elif final_assets < df.iloc[0]['Ending Investment Assets']:
-    sustainability = "Warning (Decreasing)"
-    sustainability_color = "orange"
-else:
-    sustainability = "Safe (Growing)"
-    sustainability_color = "green"
-
-# Render KPIs
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric(label="Projected Retirement Year (Crossover)", value=retirement_age_text)
-with col2:
-    st.metric(label="2040 Ending Assets (TWD)", value=f"{assets_2040:,.0f}")
-with col3:
-    st.markdown(f"**Long-Term Sustainability**")
-    st.markdown(f"<h3 style='color: {sustainability_color}; margin-top: -10px;'>{sustainability}</h3>", unsafe_allow_html=True)
-
-st.markdown("---")
-
-col4, col5, col6 = st.columns(3)
-with col4:
-    st.metric(label=f"4% Safe Withdrawal Amount (TWD)", value=f"{safe_withdrawal:,.0f}")
-with col5:
-    st.metric(label=f"Retirement ({ret_year}) Expenses (TWD)", value=f"{ret_expenses:,.0f}")
-with col6:
-    rule_status = "Safe ✅" if safe_withdrawal >= ret_expenses else "Danger ⚠️"
-    rule_color = "green" if safe_withdrawal >= ret_expenses else "red"
-    st.markdown(f"**4% Rule Health Check**")
-    st.markdown(f"<h3 style='color: {rule_color}; margin-top: -10px;'>{rule_status}</h3>", unsafe_allow_html=True)
-
-st.markdown("---")
-
-# --- CHARTS ---
-col_chart1, col_chart2 = st.columns(2)
-
-with col_chart1:
-    st.subheader("Asset Accumulation Curve")
-    fig1 = px.line(
-        df, 
-        x="Year", 
-        y="Ending Investment Assets", 
-        title="Projected Net Worth Over Time",
-        markers=True
-    )
-    fig1.update_yaxes(tickformat=",.0f")
-    st.plotly_chart(fig1, width='stretch')
-
-with col_chart2:
-    st.subheader("Income & Returns vs Expenses")
-    fig2 = go.Figure()
-    
-    # Net Salary
-    fig2.add_trace(go.Bar(
-        x=df['Year'], 
-        y=df['Net Salary'], 
-        name='Net Salary', 
-        marker_color='blue'
-    ))
-    
-    # Investment Return (Passive Income)
-    fig2.add_trace(go.Bar(
-        x=df['Year'], 
-        y=df['Investment Return'], 
-        name='Investment Return', 
-        marker_color='green'
-    ))
-    
-    # Total Expenses (Negative for comparison or line overlay)
-    fig2.add_trace(go.Scatter(
-        x=df['Year'], 
-        y=df['Total Expenses'], 
-        name='Total Expenses', 
-        mode='lines+markers',
-        line=dict(color='red', width=3)
-    ))
-    
-    fig2.update_layout(
-        barmode='stack',
-        title="Income Sources vs Total Expenses",
-        yaxis=dict(tickformat=",.0f")
-    )
-    st.plotly_chart(fig2, width='stretch')
-
-# --- DATA TABLE ---
-st.subheader("Detailed Projection Data")
-
-# Format dataframe for display
-format_dict = {col: '{:,.0f}' for col in df.columns if df[col].dtype in ['float64', 'int64'] and col != 'Year'}
-format_dict['Year'] = '{:.0f}'
-
-styled_df = df.style.format(format_dict).map(
-    lambda x: 'color: red' if isinstance(x, (int, float)) and x < 0 else '', 
-    subset=['Annual Net Savings', 'Ending Investment Assets']
-)
-
-st.dataframe(styled_df, width='stretch', height=400)
+pg = st.navigation([page_settings_obj, page_dashboard_obj])
+pg.run()
