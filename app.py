@@ -175,7 +175,7 @@ with col_chart1:
         markers=True
     )
     fig1.update_yaxes(tickformat=",.0f")
-    st.plotly_chart(fig1, use_container_width=True)
+    st.plotly_chart(fig1, width='stretch')
 
 with col_chart2:
     st.subheader("Income & Returns vs Expenses")
@@ -211,7 +211,7 @@ with col_chart2:
         title="Income Sources vs Total Expenses",
         yaxis=dict(tickformat=",.0f")
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, width='stretch')
 
 # --- DATA TABLE ---
 st.subheader("Detailed Projection Data")
@@ -225,4 +225,4 @@ styled_df = df.style.format(format_dict).map(
     subset=['Annual Net Savings', 'Ending Investment Assets']
 )
 
-st.dataframe(styled_df, use_container_width=True, height=400)
+st.dataframe(styled_df, width='stretch', height=400)
