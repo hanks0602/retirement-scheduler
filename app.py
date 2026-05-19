@@ -11,7 +11,7 @@ def calculate_tax(gross_salary):
     """Simple tax calculation placeholder."""
     return gross_salary * 0.10  # Assuming flat 10% for simplicity
 
-def run_simulation(start_year, years_to_simulate, start_assets, start_salary, salary_growth, base_expense, inflation, roi, house_year, house_cost):
+def run_simulation(start_year, years_to_simulate, start_assets, start_salary, salary_growth, base_expense, inflation, roi, house_year, house_cost, retirement_year, car_year_1, car_year_2, car_cost):
     """
     Runs the financial simulation loop.
     Returns a pandas DataFrame with the yearly trajectory.
@@ -26,12 +26,20 @@ def run_simulation(start_year, years_to_simulate, start_assets, start_salary, sa
         current_year = start_year + i
         
         # Calculate Income
-        gross_salary = current_salary
+        if current_year >= retirement_year:
+            gross_salary = 0
+        else:
+            gross_salary = current_salary
+            
         tax = calculate_tax(gross_salary)
         net_salary = gross_salary - tax
         
-        # Apply special milestone expenses (e.g., house purchase)
-        milestone_cost = house_cost if current_year == house_year else 0
+        # Apply special milestone expenses (house, cars)
+        milestone_cost = 0
+        if current_year == house_year: milestone_cost += house_cost
+        if current_year == car_year_1: milestone_cost += car_cost
+        if current_year == car_year_2: milestone_cost += car_cost
+            
         total_expenses_this_year = current_expense + milestone_cost
         
         # Calculate Assets
@@ -103,10 +111,15 @@ else:
     roi = st.sidebar.slider("Expected ROI (%)", min_value=0.0, max_value=20.0, value=6.0, step=0.5)
     
     st.sidebar.subheader("Key Milestones (Overrides)")
-    house_year = st.sidebar.number_input("House Purchase Year", value=2035, step=1)
-    house_cost = st.sidebar.number_input("House Downpayment/Total Cost (TWD)", value=3000000, step=100000)
+    retirement_year = st.sidebar.number_input("Retirement Year (Salary becomes 0)", value=2041, step=1)
+    house_year = st.sidebar.number_input("House Purchase Year", value=2030, step=1)
+    house_cost = st.sidebar.number_input("House Downpayment/Total Cost (TWD)", value=5000000, step=100000)
     
-    years_to_simulate = st.sidebar.slider("Simulation Years", min_value=10, max_value=60, value=50, step=5)
+    car_year_1 = st.sidebar.number_input("First Car Purchase Year", value=2030, step=1)
+    car_year_2 = st.sidebar.number_input("Second Car Purchase Year", value=2040, step=1)
+    car_cost = st.sidebar.number_input("Car Budget (TWD)", value=750000, step=50000)
+    
+    years_to_simulate = st.sidebar.slider("Simulation Years", min_value=10, max_value=60, value=54, step=1)
     
     # Run dynamic simulation
     df = run_simulation(
@@ -119,7 +132,11 @@ else:
         inflation=inflation,
         roi=roi,
         house_year=house_year,
-        house_cost=house_cost
+        house_cost=house_cost,
+        retirement_year=retirement_year,
+        car_year_1=car_year_1,
+        car_year_2=car_year_2,
+        car_cost=car_cost
     )
 
 # --- MAIN DASHBOARD ---
