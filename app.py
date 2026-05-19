@@ -144,16 +144,34 @@ if df.empty:
     st.warning("No data available to display.")
     st.stop()
 
-# KPI Calculations
+# --- KPI Calculations ---
 df['Passive Income Exceeds Expenses'] = df['Investment Return'] > df['Total Expenses']
 crossover_years = df[df['Passive Income Exceeds Expenses']]['Year']
 
 retirement_age_text = "Not Achieved"
 if not crossover_years.empty:
-    retirement_year = crossover_years.iloc[0]
-    retirement_age_text = str(retirement_year)
+    crossover_yr = crossover_years.iloc[0]
+    retirement_age_text = str(crossover_yr)
 
-peak_net_worth = df['Ending Investment Assets'].max()
+# Task 5 Calculations
+# Fallback to 2041 if in CSV mode where the slider isn't defined
+ret_year = retirement_year if data_mode != "Use CSV Baseline Data" else 2041
+
+# 1. 2040 Baseline Asset Check
+assets_2040 = 0
+if 2040 in df['Year'].values:
+    assets_2040 = df.loc[df['Year'] == 2040, 'Ending Investment Assets'].values[0]
+
+# 2. First Year of Retirement Total Expenses
+ret_expenses = 0
+if ret_year in df['Year'].values:
+    ret_expenses = df.loc[df['Year'] == ret_year, 'Total Expenses'].values[0]
+
+# 3. 4% Safe Withdrawal Rate Amount (Based on year prior to retirement)
+safe_withdrawal = 0
+if (ret_year - 1) in df['Year'].values:
+    assets_at_ret = df.loc[df['Year'] == (ret_year - 1), 'Ending Investment Assets'].values[0]
+    safe_withdrawal = assets_at_ret * 0.04
 
 # Sustainability Score
 final_assets = df.iloc[-1]['Ending Investment Assets']
@@ -172,10 +190,23 @@ col1, col2, col3 = st.columns(3)
 with col1:
     st.metric(label="Projected Retirement Year (Crossover)", value=retirement_age_text)
 with col2:
-    st.metric(label="Peak Net Worth (TWD)", value=f"{peak_net_worth:,.0f}")
+    st.metric(label="2040 Ending Assets (TWD)", value=f"{assets_2040:,.0f}")
 with col3:
-    st.markdown(f"**Financial Sustainability Status**")
+    st.markdown(f"**Long-Term Sustainability**")
     st.markdown(f"<h3 style='color: {sustainability_color}; margin-top: -10px;'>{sustainability}</h3>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+col4, col5, col6 = st.columns(3)
+with col4:
+    st.metric(label=f"4% Safe Withdrawal Amount (TWD)", value=f"{safe_withdrawal:,.0f}")
+with col5:
+    st.metric(label=f"Retirement ({ret_year}) Expenses (TWD)", value=f"{ret_expenses:,.0f}")
+with col6:
+    rule_status = "Safe ✅" if safe_withdrawal >= ret_expenses else "Danger ⚠️"
+    rule_color = "green" if safe_withdrawal >= ret_expenses else "red"
+    st.markdown(f"**4% Rule Health Check**")
+    st.markdown(f"<h3 style='color: {rule_color}; margin-top: -10px;'>{rule_status}</h3>", unsafe_allow_html=True)
 
 st.markdown("---")
 
